@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 
 interface QueryResult {
@@ -7,6 +7,8 @@ interface QueryResult {
   length: number;
 }
 
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
 const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [queryFile, setQueryFile] = useState<string>("");
@@ -14,12 +16,18 @@ const App: React.FC = () => {
   const [query, setQuery] = useState<string>("");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [isListening, setIsListening] = useState<boolean>(false);
+
+  const recognitionRef = useRef<any>(null);
+
+  const SpeechRecognition =
+    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
   // Fetch available files on component mount
   useEffect(() => {
     const fetchFiles = async () => {
       try {
-        const response = await axios.get("http://localhost:3000/files");
+        const response = await axios.get(`${backendUrl}/files`);
         setAvailableFiles(response.data.files);
         if (response.data.files.length > 0) {
           // Set the first file as the default selected file
@@ -59,14 +67,14 @@ const App: React.FC = () => {
     setLoading(true);
     try {
       const response = await axios.post(
-        "http://localhost:3000/upload",
+        `${backendUrl}/upload`,
         formData,
         { headers: { "Content-Type": "multipart/form-data" } }
       );
       alert(response.data.message);
 
       // Refresh the list of available files after upload
-      const filesResponse = await axios.get("http://localhost:3000/files");
+      const filesResponse = await axios.get(`${backendUrl}/files`);
       setAvailableFiles(filesResponse.data.files);
     } catch (error) {
       console.error("Upload error:", error);
@@ -90,7 +98,7 @@ const App: React.FC = () => {
 
     setLoading(true);
     try {
-      const response = await axios.post("http://localhost:3000/query", {
+      const response = await axios.post(`${backendUrl}/query`, {
         naturalLanguageQuery: query,
         tableName: queryFile.replace(".csv", ""),
       });
@@ -101,6 +109,48 @@ const App: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Handle voice input
+  const handleVoiceInput = () => {
+    if (isListening) {
+      // Stop the recognition if it's already listening
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    if (!SpeechRecognition) {
+      alert("Your browser does not support speech recognition.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+    
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      setIsListening(false);
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      console.log("Transcript:", transcript);
+      setQuery(transcript);
+    };
+
+    recognition.start();
   };
 
   return (
@@ -170,12 +220,23 @@ const App: React.FC = () => {
           <h2 className="text-xl font-semibold text-gray-800 mb-2">
             Run Query
           </h2>
-          <textarea
-            placeholder="Enter your natural language query"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full h-28 border border-gray-300 rounded-lg p-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500"
-          ></textarea>
+          <div className="flex items-center">
+            <textarea
+              placeholder="Enter your natural language query"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full h-28 border border-gray-300 rounded-lg p-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+            ></textarea>
+            <button
+              onClick={handleVoiceInput}
+              className={`ml-3 p-3 rounded-full ${
+                isListening ? "bg-red-500" : "bg-green-500"
+              } text-white`}
+              title="Use voice input"
+            >
+              {isListening ? "Stop" : "🎤"}
+            </button>
+          </div>
           <button
             onClick={handleQuery}
             disabled={loading}
